@@ -1,0 +1,150 @@
+name: Inline monolithic Colab notebook
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inline_monolithic_notebook.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  inline-notebook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Inline all processing code into the notebook
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, re
+          from pathlib import Path
+
+          notebook_path = Path('BIG_DATA_Customer_Intelligence_PRO_Colab.ipynb')
+          pipeline_dir = Path('colab_pipeline')
+
+          descriptions = {
+              '00_setup.py': """**Mục tiêu:** khởi tạo Spark/analytics environment, tải đúng dữ liệu từ repository, kiểm tra chất lượng dữ liệu và dựng vùng Executive Dashboard.\n\n**Input:** `baskets.csv`, `ratings2k.csv`.  \n**Output:** Spark DataFrames sạch, KPI dữ liệu, cấu hình chung cho toàn pipeline.\n\n**Vì sao:** mọi model phía sau chỉ đáng tin khi schema, missing values, rating scale và sparsity được kiểm tra trước.""",
+              '01_big_data_basics.py': """**Mục tiêu:** thực hiện các yêu cầu Big Data nền tảng bằng cả RDD và DataFrame để minh chứng cách Spark xử lý cùng một bài toán ở hai abstraction level.\n\n**Output:** top products/customers, xu hướng theo thời gian và các bảng/biểu đồ đối chiếu.\n\n**Điểm cần trình bày:** DataFrame thường dễ tối ưu hơn nhờ Catalyst; RDD cho thấy rõ phép biến đổi phân tán.""",
+              '02_rfv.py': """**Mục tiêu:** tạo phân khúc khách hàng kiểu RFM nhưng không bịa dữ liệu tiền tệ. Vì `baskets.csv` không có doanh thu, notebook dùng **RFV = Recency–Frequency–Volume**.\n\n**Output:** RFV score, lifecycle segment và trực quan hóa customer segments.\n\n**Ý nghĩa kinh doanh:** giúp mô tả nhóm khách hàng active, loyal, at-risk và low-engagement bằng hành vi mua thực tế.""",
+              '03_fpgrowth.py': """**Mục tiêu:** khai phá Market Basket bằng Spark FP-Growth, tuning support/confidence và ưu tiên rule có tính hành động.\n\n**Output:** frequent itemsets, association rules, Confidence/Lift/Support và cross-sell visualization.\n\n**Ý nghĩa:** Lift giúp phân biệt một rule thật sự có quan hệ với rule chỉ xuất hiện do item vốn đã phổ biến.""",
+              '04_svd.py': """**Mục tiêu:** giảm chiều ma trận user–item bằng truncated SVD để học latent representation có thể dùng cho clustering và recommendation.\n\n**Output:** singular-value energy curve, số chiều được chọn có căn cứ, user/item embeddings và latent concepts.\n\n**Lý do chọn số chiều:** dựa trên captured energy thay vì chọn một con số tùy ý.""",
+              '05_cure_core.py': """**Mục tiêu:** chạy **CURE đúng bản chất** với nhiều representative points và compression, không dùng KMeans rồi đổi tên.\n\n**Output:** tuning theo số cluster/representatives/compression, cluster labels và representative points.\n\n**Đánh giá:** Silhouette, Davies–Bouldin, Calinski–Harabasz và độ cân bằng cluster.""",
+              '06_cure_story.py': """**Mục tiêu:** kiểm tra độ ổn định của CURE và biến cluster thành câu chuyện có thể giải thích cho khách hàng.\n\n**Output:** stability ARI, PCA/UMAP/t-SNE, cluster personas và profile visualization.\n\n**Ý nghĩa:** cluster tốt không chỉ tách nhau trên metric mà còn phải ổn định và diễn giải được.""",
+              '07_recommender_core.py': """**Mục tiêu:** xây baseline và nhiều recommender cạnh tranh công bằng: global/user/item mean, UserCF và SVD-based reconstruction.\n\n**Đánh giá hai mục tiêu:** rating prediction bằng RMSE/MAE và Top-N relevance bằng Precision@K/Recall@K.\n\n**Nguyên tắc:** không dùng test ratings trong lúc fit để tránh data leakage.""",
+              '08_recommender_als_tuning.py': """**Mục tiêu:** tuning Spark ALS theo rank, regularization và iteration để tìm cấu hình tốt trên validation data.\n\n**Output:** bảng hyperparameter search, best ALS configuration và predictions.\n\n**Ý nghĩa Big Data:** ALS là model factorization được Spark MLlib triển khai cho recommendation phân tán.""",
+              '09_recommender_eval_demo.py': """**Mục tiêu:** statistical validation qua nhiều random seeds, tổng hợp RMSE/MAE/Precision@K/Recall@K và chọn **model champion** thay vì dựa vào một split may mắn.\n\n**Output:** mean ± std metrics, champion score và demo Top-N unseen items cho một user.\n\n**Cách đọc:** RMSE/MAE càng thấp càng tốt; Precision/Recall càng cao càng tốt.""",
+              '10_spark_performance.py': """**Mục tiêu:** chứng minh vai trò của Spark bằng benchmark có kiểm soát: tăng scale, throughput, cache reuse và physical execution plan.\n\n**Nguyên tắc:** nếu pandas nhanh hơn trên dữ liệu nhỏ/local thì notebook nói rõ overhead; không tạo claim sai để làm Spark trông tốt hơn.\n\n**Output:** scaling curves, throughput, cache speedup và plan evidence.""",
+              '11_dashboard_export.py': """**Mục tiêu:** tổng hợp toàn bộ evidence thành Executive Dashboard, automatic conclusions và artifacts có thể giao cho khách hàng.\n\n**Output:** KPI cards có tooltip, model/cluster/rule/scalability charts, CSV, HTML dashboard, model artifacts và ZIP export.\n\n**Cách demo:** bắt đầu từ dashboard/kết luận rồi mới drill-down về code và metric phía trên.""",
+          }
+
+          nb = json.loads(notebook_path.read_text(encoding='utf-8'))
+
+          # Rewrite title so the notebook clearly presents itself as a single-file artifact.
+          nb['cells'][0]['source'] = [
+              '# BIG DATA — Customer Intelligence PRO\n',
+              '### Single-Notebook Google Colab • Spark • SVD • CURE • FP-Growth • ALS • Executive Dashboard\n',
+              '\n',
+              'Toàn bộ **luồng xử lý, code, metric, visualization và giải thích nằm trực tiếp trong notebook này**. Không gọi file Python bên ngoài.\n',
+              '\n',
+              '> Mục tiêu: người xem có thể đi từ Data → Analytics → SVD → CURE → Recommendation → Spark Benchmark → Dashboard chỉ trong một file, đồng thời mọi KPI đều được tính lại từ dữ liệu thực khi chạy.'
+          ]
+
+          # Environment cell: dependencies only. No git clone and no external pipeline path.
+          for cell in nb['cells']:
+              if cell.get('cell_type') == 'code':
+                  src = ''.join(cell.get('source', []))
+                  if 'PIPELINE=' in src and 'git clone' in src:
+                      cell['source'] = [
+                          '# Cài các dependency cần thiết cho toàn bộ notebook.\n',
+                          '!pip -q install pyspark==3.5.1 pyclustering==0.10.1.2 umap-learn plotly networkx psutil kaleido\n'
+                      ]
+                      break
+
+          new_cells = []
+          for cell in nb['cells']:
+              if cell.get('cell_type') == 'markdown':
+                  clean = []
+                  for line in cell.get('source', []):
+                      if 'Source: `colab_pipeline/' in line:
+                          continue
+                      clean.append(line)
+                  cell['source'] = clean
+                  new_cells.append(cell)
+                  continue
+
+              src = ''.join(cell.get('source', [])) if cell.get('cell_type') == 'code' else ''
+              m = re.search(r'%run\s+-i\s+\{PIPELINE\}/([^\s]+)', src)
+              if not m:
+                  new_cells.append(cell)
+                  continue
+
+              stage = m.group(1)
+              stage_path = pipeline_dir / stage
+              if not stage_path.exists():
+                  raise FileNotFoundError(stage_path)
+
+              # Append an explanation block immediately before the actual code.
+              if new_cells and new_cells[-1].get('cell_type') == 'markdown':
+                  existing = ''.join(new_cells[-1].get('source', [])).rstrip()
+                  explanation = descriptions.get(stage, '')
+                  new_cells[-1]['source'] = (existing + '\n\n' + explanation + '\n').splitlines(True)
+
+              code = stage_path.read_text(encoding='utf-8')
+              if not code.endswith('\n'):
+                  code += '\n'
+              cell['source'] = code.splitlines(True)
+              cell['execution_count'] = None
+              cell['outputs'] = []
+              new_cells.append(cell)
+
+          nb['cells'] = new_cells
+
+          # Final single-file validation.
+          full_text = '\n'.join(''.join(c.get('source', [])) for c in nb['cells'])
+          forbidden = ['colab_pipeline', '%run -i', 'exec(open(']
+          found = [x for x in forbidden if x in full_text]
+          if found:
+              raise RuntimeError(f'External pipeline references still present: {found}')
+
+          code_cells = sum(c.get('cell_type') == 'code' for c in nb['cells'])
+          markdown_cells = sum(c.get('cell_type') == 'markdown' for c in nb['cells'])
+          if code_cells < 10 or markdown_cells < 10:
+              raise RuntimeError('Notebook structure unexpectedly small after inlining')
+
+          notebook_path.write_text(json.dumps(nb, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+          print('Monolithic notebook created:', notebook_path)
+          print('Cells:', len(nb['cells']), '| code:', code_cells, '| markdown:', markdown_cells)
+          print('Size:', notebook_path.stat().st_size, 'bytes')
+          PY
+
+      - name: Remove external pipeline sources and validate JSON
+        shell: bash
+        run: |
+          rm -rf colab_pipeline
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('BIG_DATA_Customer_Intelligence_PRO_Colab.ipynb')
+          nb=json.loads(p.read_text(encoding='utf-8'))
+          text='\n'.join(''.join(c.get('source',[])) for c in nb['cells'])
+          assert 'colab_pipeline' not in text
+          assert '%run -i' not in text
+          assert 'exec(open(' not in text
+          print('Validation OK — single notebook contains the processing code directly.')
+          PY
+
+      - name: Remove one-time workflow and commit result
+        shell: bash
+        run: |
+          rm -f .github/workflows/inline_monolithic_notebook.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Inline full processing flow into single Colab notebook'
+          git push origin main
